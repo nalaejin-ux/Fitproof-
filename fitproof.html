@@ -90,10 +90,13 @@
   /* CAMERA */
   .cam-wrap{position:relative;flex:1;border-radius:16px;overflow:hidden;background:#000;min-height:60vh}
   #video,#ghost,#guides{position:absolute;inset:0;width:100%;height:100%}
+  #importStage{background:#0a0a0a;touch-action:none}
+  #importImg{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform;max-width:none;user-select:none;-webkit-user-drag:none}
+  #importGuides{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   #video{object-fit:cover;transform:scaleX(1)}
   #ghost{object-fit:cover;pointer-events:none;opacity:.0;display:none}
   #guides{pointer-events:none}
-  .cam-top{position:absolute;top:0;left:0;right:0;display:flex;gap:8px;padding:10px;z-index:3}
+  .cam-top{position:absolute;top:0;left:0;right:0;display:flex;flex-wrap:wrap;gap:8px;padding:10px;z-index:3}
   .cam-pill{font-family:var(--mono);font-size:11px;letter-spacing:.08em;background:rgba(20,22,26,.6);color:#fff;
     border:none;padding:8px 11px;border-radius:999px;cursor:pointer;backdrop-filter:blur(4px)}
   .cam-bottom{position:absolute;left:0;right:0;bottom:0;padding:12px 14px 16px;z-index:3;
@@ -104,6 +107,12 @@
   .angle-seg{display:flex;background:rgba(255,255,255,.14);border-radius:11px;padding:3px;margin-bottom:12px}
   .angle-seg .seg{flex:1;border:none;background:transparent;color:#fff;font-family:var(--sans);font-size:13.5px;font-weight:700;padding:9px;border-radius:8px;cursor:pointer}
   .angle-seg .seg[aria-pressed="true"]{background:#fff;color:var(--ink)}
+  .grid-ctrl{margin-bottom:12px;color:#fff;font-family:var(--mono);font-size:12px}
+  .grid-ctrl .gc-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .grid-ctrl .gc-row input[type=range]{flex:1}
+  .grid-ctrl .gc-lab{opacity:.85;white-space:nowrap}
+  .grid-ctrl .chip{background:rgba(255,255,255,.14);color:#fff;border-color:rgba(255,255,255,.3);font-family:var(--mono);font-size:11px;padding:6px 10px;white-space:nowrap}
+  .grid-ctrl .chip[aria-pressed="false"]{opacity:.6}
   .cond-row .chip{flex:0 0 auto;background:rgba(255,255,255,.14);color:#fff;border-color:rgba(255,255,255,.25)}
   .cond-row .chip[aria-pressed="true"]{background:#fff;color:var(--ink);border-color:#fff}
   .shutter-row{display:flex;align-items:center;justify-content:center;gap:18px}
@@ -166,6 +175,8 @@
 
     <div style="flex:1"></div>
     <button class="btn btn-proof" id="todayProof" style="margin-top:16px">● 오늘 인증하기</button>
+    <button class="btn btn-ghost" id="importBtn" style="margin-top:10px">🖼 기존 사진 불러와서 맞추기</button>
+    <input type="file" id="importFile" accept="image/*" hidden>
     <p class="hint" style="text-align:center;margin:10px 0 0">📵 모든 사진은 이 기기에만 저장돼요. 외부 전송 없음.</p>
   </section>
 
@@ -204,8 +215,10 @@
       <div class="cam-top">
         <button class="cam-pill" data-go="home">‹ 닫기</button>
         <button class="cam-pill" id="gridToggle">▦ 그리드</button>
-        <button class="cam-pill" id="flipCam">⟳ 카메라</button>
+        <button class="cam-pill" id="flipCam">⟳ 전/후면</button>
+        <button class="cam-pill" id="lensBtn" style="display:none">🔍 광각</button>
         <div class="grow" style="flex:1"></div>
+        <span class="cam-pill" id="zoomInd" style="display:none;cursor:default">1.0×</span>
         <span class="cam-pill" id="dayTag" style="cursor:default">DAY —</span>
       </div>
 
@@ -214,6 +227,19 @@
           <button class="seg" data-angle="front" aria-pressed="true">정면</button>
           <button class="seg" data-angle="side" aria-pressed="false">측면</button>
           <button class="seg" data-angle="back" aria-pressed="false">후면</button>
+        </div>
+        <div class="grid-ctrl" id="gridCtrl" style="display:none">
+          <div class="gc-row">
+            <button class="chip" id="gridOnBtn" aria-pressed="true">격자 켜짐</button>
+            <span class="gc-lab">칸수</span>
+            <input type="range" id="gridColsR" min="6" max="28" value="12">
+            <span id="gridColsVal">12</span>
+          </div>
+          <div class="gc-row">
+            <span class="gc-lab">투명도</span>
+            <input type="range" id="gridAlphaR" min="4" max="60" value="16">
+            <span id="gridAlphaVal">16%</span>
+          </div>
         </div>
         <div class="ghost-ctrl" id="ghostCtrl" style="display:none">
           <span>고스트</span>
@@ -226,6 +252,30 @@
           <button class="shutter" id="shutterBtn" aria-label="촬영"></button>
           <button class="mini" id="ghostBtn">고스트</button>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- IMPORT (fit existing photo to grid) -->
+  <section class="screen" id="s-import" style="padding:0">
+    <div class="cam-wrap" id="importStage">
+      <img id="importImg" alt="">
+      <canvas id="importGuides"></canvas>
+      <div class="cam-top">
+        <button class="cam-pill" data-go="home">‹ 닫기</button>
+        <button class="cam-pill" id="importGrid">▦ 그리드</button>
+        <button class="cam-pill" id="importReset">↺ 처음으로</button>
+        <div class="grow" style="flex:1"></div>
+        <span class="cam-pill" style="cursor:default">손가락: 이동·확대</span>
+      </div>
+      <div class="cam-bottom">
+        <div class="angle-seg" id="impAngleSeg">
+          <button class="seg" data-angle="front" aria-pressed="true">정면</button>
+          <button class="seg" data-angle="side" aria-pressed="false">측면</button>
+          <button class="seg" data-angle="back" aria-pressed="false">후면</button>
+        </div>
+        <div class="cond-row" id="impCondRow"></div>
+        <button class="btn btn-proof" id="importSave">이 위치로 저장</button>
       </div>
     </div>
   </section>
@@ -339,6 +389,7 @@ function go(id){
   if(id==='create')initCreate();
   if(id==='capture')startCapture();
   if(id==='compare')initCompare();
+  if(id==='import')initImport();
   if(id==='share')initShare();
   if(id==='settings')initSettings();
 }
@@ -418,7 +469,7 @@ $('#saveChallenge').onclick=async()=>{
 };
 
 /* ---------- CAMERA / CAPTURE ---------- */
-let stream=null,facing='environment',gridOn=true,rafId=null;
+let stream=null,facing='environment',gridOn=true,rafId=null,digZoom=1,backDevices=[],backIndex=0,gridCols=12,gridAlpha=0.16;
 let capCondition=CONDITIONS[0],ghostPhoto=null,capAngle='front',capChallenge=null;
 async function startCapture(){
   const ch=await getActive();
@@ -448,51 +499,89 @@ $$('#angleSeg .seg').forEach(b=>b.onclick=()=>{
 async function openCam(){
   stopCamera();
   try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1080},height:{ideal:1440}},audio:false});
+    let video;
+    if(facing==='environment'&&backDevices[backIndex]){
+      video={deviceId:{exact:backDevices[backIndex]},width:{ideal:1080},height:{ideal:1440}};
+    }else{
+      video={facingMode:facing,width:{ideal:1080},height:{ideal:1440}};
+    }
+    stream=await navigator.mediaDevices.getUserMedia({video,audio:false});
     const v=$('#video');v.srcObject=stream;await v.play();
+    digZoom=1;applyDigZoom();
+    if(facing==='environment')await enumerateBackCams();
+    updateLensBtn();
     drawGuidesLoop();
   }catch(err){
     toast('카메라를 열 수 없어요. HTTPS(또는 localhost)에서 열어야 해요.');
     console.warn(err);
   }
 }
+async function enumerateBackCams(){
+  if(backDevices.length)return;
+  try{
+    const devs=await navigator.mediaDevices.enumerateDevices();
+    backDevices=devs.filter(d=>d.kind==='videoinput'&&!/front|전면|user|face/i.test(d.label)).map(d=>d.deviceId).filter(Boolean);
+  }catch(e){}
+}
+function updateLensBtn(){
+  const b=$('#lensBtn');
+  b.style.display=(facing==='environment'&&backDevices.length>1)?'block':'none';
+  b.textContent='🔍 렌즈 '+(backIndex+1)+'/'+backDevices.length;
+}
+$('#lensBtn').onclick=()=>{if(backDevices.length>1){backIndex=(backIndex+1)%backDevices.length;openCam();}};
+function applyDigZoom(){
+  $('#video').style.transform='scale('+digZoom+')';
+  const z=$('#zoomInd');z.textContent=digZoom.toFixed(1)+'×';z.style.display=digZoom>1.02?'block':'none';
+}
+/* pinch-to-zoom on the capture camera */
+(function camPinch(){
+  const wrap=$('#s-capture .cam-wrap');let startDist=0,startZoom=1;
+  const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
+  wrap.addEventListener('touchstart',e=>{if(e.touches.length===2){startDist=dist(e.touches);startZoom=digZoom;}},{passive:true});
+  wrap.addEventListener('touchmove',e=>{if(e.touches.length===2&&startDist){e.preventDefault();
+    digZoom=Math.max(1,Math.min(4,startZoom*dist(e.touches)/startDist));applyDigZoom();}},{passive:false});
+})();
 function stopCamera(){if(rafId)cancelAnimationFrame(rafId);rafId=null;if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}
 $('#flipCam').onclick=()=>{facing=facing==='environment'?'user':'environment';openCam();};
-$('#gridToggle').onclick=()=>{gridOn=!gridOn;};
+$('#gridToggle').onclick=()=>{const p=$('#gridCtrl');p.style.display=p.style.display==='none'?'block':'none';};
+$('#gridOnBtn').onclick=()=>{gridOn=!gridOn;$('#gridOnBtn').setAttribute('aria-pressed',gridOn);$('#gridOnBtn').textContent=gridOn?'격자 켜짐':'격자 꺼짐';};
+$('#gridColsR').oninput=e=>{gridCols=+e.target.value;$('#gridColsVal').textContent=e.target.value;};
+$('#gridAlphaR').oninput=e=>{gridAlpha=(+e.target.value)/100;$('#gridAlphaVal').textContent=e.target.value+'%';};
 
+/* shared guide painter (used by camera + import) */
+function paintGuides(ctx,w,h,angle,showGrid){
+  ctx.clearRect(0,0,w,h);
+  if(showGrid){
+    ctx.strokeStyle='rgba(255,255,255,'+gridAlpha+')';ctx.lineWidth=1;
+    const step=w/gridCols;
+    for(let x=step;x<w;x+=step){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
+    for(let y=step;y<h;y+=step){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+  }
+  const guides=[[0.09,'머리'],[0.24,'어깨'],[0.52,'엉덩이'],[0.76,'무릎']];
+  ctx.font='11px ui-monospace,monospace';
+  guides.forEach(([f,lab])=>{
+    const y=h*f;ctx.strokeStyle='rgba(28,108,168,.85)';ctx.lineWidth=1.5;ctx.setLineDash([7,6]);
+    ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='rgba(28,108,168,.95)';ctx.fillText(lab,8,y-5);
+  });
+  if(angle==='side'){
+    ctx.strokeStyle='rgba(28,108,168,.8)';ctx.lineWidth=1.5;ctx.setLineDash([6,8]);
+    ctx.beginPath();ctx.moveTo(w/2,0);ctx.lineTo(w/2,h);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='rgba(28,108,168,.95)';ctx.fillText('기준선 (귀-어깨-발목)',w/2+6,18);
+  }else{
+    ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=1;ctx.setLineDash([4,8]);
+    ctx.beginPath();ctx.moveTo(w/2,0);ctx.lineTo(w/2,h);ctx.stroke();ctx.setLineDash([]);
+  }
+  const fy=h*0.9;ctx.fillStyle='rgba(232,75,60,.18)';ctx.fillRect(0,fy,w,h-fy);
+  ctx.strokeStyle='rgba(232,75,60,.9)';ctx.beginPath();ctx.moveTo(0,fy);ctx.lineTo(w,fy);ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,.9)';ctx.fillText('발 위치',8,fy+16);
+}
 function drawGuidesLoop(){
-  const c=$('#guides'),v=$('#video');
+  const c=$('#guides');
   const draw=()=>{
     const w=c.clientWidth,h=c.clientHeight;
     if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
-    const ctx=c.getContext('2d');ctx.clearRect(0,0,w,h);
-    if(gridOn){
-      ctx.strokeStyle='rgba(255,255,255,.16)';ctx.lineWidth=1;
-      const step=w/12;
-      for(let x=step;x<w;x+=step){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
-      for(let y=step;y<h;y+=step){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
-    }
-    // body guide lines
-    const guides=[[0.09,'머리'],[0.24,'어깨'],[0.52,'엉덩이'],[0.76,'무릎']];
-    ctx.font='11px ui-monospace,monospace';
-    guides.forEach(([f,lab])=>{
-      const y=h*f;ctx.strokeStyle='rgba(28,108,168,.85)';ctx.lineWidth=1.5;ctx.setLineDash([7,6]);
-      ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();ctx.setLineDash([]);
-      ctx.fillStyle='rgba(28,108,168,.95)';ctx.fillText(lab,8,y-5);
-    });
-    // vertical reference: center for front/back, plumb (귀-발목) for side
-    if(capAngle==='side'){
-      ctx.strokeStyle='rgba(28,108,168,.8)';ctx.lineWidth=1.5;ctx.setLineDash([6,8]);
-      ctx.beginPath();ctx.moveTo(w/2,0);ctx.lineTo(w/2,h);ctx.stroke();ctx.setLineDash([]);
-      ctx.fillStyle='rgba(28,108,168,.95)';ctx.fillText('기준선 (귀-어깨-발목)',w/2+6,18);
-    }else{
-      ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=1;ctx.setLineDash([4,8]);
-      ctx.beginPath();ctx.moveTo(w/2,0);ctx.lineTo(w/2,h);ctx.stroke();ctx.setLineDash([]);
-    }
-    // foot zone
-    const fy=h*0.9;ctx.fillStyle='rgba(232,75,60,.18)';ctx.fillRect(0,fy,w,h-fy);
-    ctx.strokeStyle='rgba(232,75,60,.9)';ctx.beginPath();ctx.moveTo(0,fy);ctx.lineTo(w,fy);ctx.stroke();
-    ctx.fillStyle='rgba(255,255,255,.9)';ctx.fillText('발 위치',8,fy+16);
+    paintGuides(c.getContext('2d'),w,h,capAngle,gridOn);
     rafId=requestAnimationFrame(draw);
   };
   draw();
@@ -520,10 +609,12 @@ function runCountdown(n,done){
 }
 async function capture(){
   const v=$('#video');if(!v.videoWidth){toast('카메라 준비 중...');return;}
-  const cv=document.createElement('canvas');cv.width=v.videoWidth;cv.height=v.videoHeight;
+  const vw=v.videoWidth,vh=v.videoHeight;
+  const zw=vw/digZoom,zh=vh/digZoom,sx=(vw-zw)/2,sy=(vh-zh)/2;
+  const cv=document.createElement('canvas');cv.width=zw;cv.height=zh;
   const ctx=cv.getContext('2d');
-  if(facing==='user'){ctx.translate(cv.width,0);ctx.scale(-1,1);} // un-mirror front cam
-  ctx.drawImage(v,0,0,cv.width,cv.height);
+  if(facing==='user'){ctx.translate(zw,0);ctx.scale(-1,1);} // un-mirror front cam
+  ctx.drawImage(v,sx,sy,zw,zh,0,0,zw,zh);
   const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.9));
   const ch=await getActive();
   const day=Math.max(1,Math.floor((today()-ch.startDate)/86400000)+1);
@@ -535,6 +626,78 @@ async function capture(){
 }
 function flash(){const f=document.createElement('div');f.style.cssText='position:absolute;inset:0;background:#fff;z-index:5;opacity:.8;transition:opacity .3s';
   $('.cam-wrap').appendChild(f);requestAnimationFrame(()=>{f.style.opacity='0';setTimeout(()=>f.remove(),320);});}
+
+/* ---------- IMPORT (fit existing photo to grid) ---------- */
+const imp={img:null,x:0,y:0,scale:1,baseW:0,baseH:0,angle:'front',cond:CONDITIONS[0],grid:true,challenge:null};
+$('#importBtn').onclick=async()=>{
+  const ch=await getActive();
+  if(!ch){toast('먼저 챌린지를 만들어주세요');return go('create');}
+  $('#importFile').value='';$('#importFile').click();
+};
+$('#importFile').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const img=new Image();
+  img.onload=async()=>{imp.img=img;imp.angle='front';imp.cond=CONDITIONS[0];imp.grid=true;imp.challenge=await getActive();go('import');};
+  img.src=objURL(f);
+};
+function stageSize(){const s=$('#importStage');return {w:s.clientWidth,h:s.clientHeight};}
+function initImport(){
+  $$('#impAngleSeg .seg').forEach(b=>{b.setAttribute('aria-pressed',b.dataset.angle===imp.angle);
+    b.onclick=()=>{imp.angle=b.dataset.angle;$$('#impAngleSeg .seg').forEach(x=>x.setAttribute('aria-pressed',x===b));drawImportGuides();};});
+  chipGroup($('#impCondRow'),CONDITIONS,imp.cond,v=>imp.cond=v);
+  requestAnimationFrame(()=>{fitImportImage();drawImportGuides();});
+}
+function fitImportImage(){
+  const {w,h}=stageSize();const img=imp.img;if(!img||!w)return;
+  const r=img.naturalWidth/img.naturalHeight,sr=w/h;
+  if(r>sr){imp.baseH=h;imp.baseW=h*r;}else{imp.baseW=w;imp.baseH=w/r;}
+  imp.scale=1;imp.x=(w-imp.baseW)/2;imp.y=(h-imp.baseH)/2;
+  const el=$('#importImg');el.src=img.src;el.style.width=imp.baseW+'px';el.style.height=imp.baseH+'px';
+  applyImportTransform();
+}
+function applyImportTransform(){$('#importImg').style.transform=`translate(${imp.x}px,${imp.y}px) scale(${imp.scale})`;}
+function drawImportGuides(){
+  const c=$('#importGuides'),{w,h}=stageSize();
+  if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
+  paintGuides(c.getContext('2d'),w,h,imp.angle,imp.grid);
+}
+$('#importGrid').onclick=()=>{imp.grid=!imp.grid;drawImportGuides();};
+$('#importReset').onclick=()=>fitImportImage();
+(function importGesture(){
+  const stage=$('#importStage');let mode=null,lastX=0,lastY=0,startDist=0,startScale=1,cx=0,cy=0,md=false;
+  const dist=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);
+  const mid=t=>({x:(t[0].clientX+t[1].clientX)/2,y:(t[0].clientY+t[1].clientY)/2});
+  stage.addEventListener('touchstart',e=>{
+    if(e.touches.length===1){mode='drag';lastX=e.touches[0].clientX;lastY=e.touches[0].clientY;}
+    else if(e.touches.length===2){mode='pinch';startDist=dist(e.touches);startScale=imp.scale;
+      const m=mid(e.touches),r=stage.getBoundingClientRect();cx=m.x-r.left;cy=m.y-r.top;}
+  },{passive:true});
+  stage.addEventListener('touchmove',e=>{
+    if(mode==='drag'&&e.touches.length===1){e.preventDefault();
+      imp.x+=e.touches[0].clientX-lastX;imp.y+=e.touches[0].clientY-lastY;
+      lastX=e.touches[0].clientX;lastY=e.touches[0].clientY;applyImportTransform();}
+    else if(mode==='pinch'&&e.touches.length===2){e.preventDefault();
+      const ns=Math.max(0.2,Math.min(6,startScale*dist(e.touches)/startDist)),k=ns/imp.scale;
+      imp.x=cx-(cx-imp.x)*k;imp.y=cy-(cy-imp.y)*k;imp.scale=ns;applyImportTransform();}
+  },{passive:false});
+  stage.addEventListener('touchend',e=>{
+    if(e.touches.length===0)mode=null;
+    else if(e.touches.length===1){mode='drag';lastX=e.touches[0].clientX;lastY=e.touches[0].clientY;}});
+  stage.addEventListener('mousedown',e=>{md=true;lastX=e.clientX;lastY=e.clientY;});
+  window.addEventListener('mousemove',e=>{if(!md)return;imp.x+=e.clientX-lastX;imp.y+=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;applyImportTransform();});
+  window.addEventListener('mouseup',()=>md=false);
+})();
+$('#importSave').onclick=async()=>{
+  if(!imp.img||!imp.challenge){toast('이미지를 먼저 불러오세요');return;}
+  const {w,h}=stageSize(),out=2;
+  const cv=document.createElement('canvas');cv.width=w*out;cv.height=h*out;
+  const ctx=cv.getContext('2d');ctx.fillStyle='#000';ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.drawImage(imp.img,imp.x*out,imp.y*out,imp.baseW*imp.scale*out,imp.baseH*imp.scale*out);
+  const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.9));
+  const ch=imp.challenge,day=Math.max(1,Math.floor((today()-ch.startDate)/86400000)+1);
+  await DB.put('photos',{id:uid(),challengeId:ch.id,blob,condition:imp.cond,dayNumber:day,takenAt:Date.now(),angle:imp.angle,imported:true});
+  toast(`불러온 사진 저장 · ${ANGLE_LABEL[imp.angle]}`);go('home');
+};
 
 /* ---------- COMPARE ---------- */
 let cmpBefore=null,cmpAfter=null,cmpAngle='front';
