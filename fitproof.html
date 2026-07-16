@@ -314,6 +314,8 @@
       <div class="handle" id="handle"></div>
     </div>
     <div style="flex:1"></div>
+    <button class="btn btn-ink" id="aiAlignBtn" style="display:none;margin-top:14px">🤖 AI 자동 정렬 + 부위 비교</button>
+    <div class="card" id="aiResult" style="display:none;margin-top:12px"></div>
     <button class="btn btn-proof" id="toShare" style="display:none;margin-top:14px">이걸로 공유카드 만들기 ›</button>
   </section>
 
@@ -794,6 +796,7 @@ async function initCompare(){
 async function buildCmpThumbs(){
   cmpBefore=null;cmpAfter=null;
   $('#slider').style.display='none';$('#toShare').style.display='none';
+  $('#aiAlignBtn').style.display='none';$('#aiResult').style.display='none';
   const ch=await getActive();
   const photos=(await DB.all('photos')).filter(p=>(!ch||p.challengeId===ch.id)&&(p.angle||'front')===cmpAngle).sort((a,b)=>a.takenAt-b.takenAt);
   const pick=$('#cmpPick');pick.innerHTML='';
@@ -824,6 +827,7 @@ async function renderSlider(){
   $('#tagB').textContent=`BEFORE · D${cmpBefore.dayNumber}`;
   $('#tagA').textContent=`AFTER · D${cmpAfter.dayNumber}`;
   $('#slider').style.display='block';$('#toShare').style.display='flex';
+  $('#aiAlignBtn').style.display='flex';$('#aiResult').style.display='none';
   setHandle(50);
 }
 function setHandle(pct){
@@ -839,6 +843,98 @@ function setHandle(pct){
   window.addEventListener('pointerup',()=>drag=false);
 })();
 $('#toShare').onclick=()=>{shareFrom={before:cmpBefore,after:cmpAfter};go('share');};
+
+/* ---------- AI POSE ALIGN (photos never leave the device) ---------- */
+let poseLM=null;
+async function loadPose(){
+  if(poseLM)return poseLM;
+  toast('AI 모델 준비 중... 최초 1회만 내려받아요');
+  const vision=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+  const files=await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+  poseLM=await vision.PoseLandmarker.createFromOptions(files,{
+    baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'},
+    runningMode:'IMAGE',numPoses:1,outputSegmentationMasks:true});
+  return poseLM;
+}
+const avg=(a,b)=>({x:(a.x+b.x)/2,y:(a.y+b.y)/2});
+async function analyzePose(img){
+  const lm=await loadPose();
+  const res=lm.detect(img);
+  if(!res.landmarks||!res.landmarks.length)return null;
+  const L=res.landmarks[0];
+  const nose=L[0],shoulder=avg(L[11],L[12]),hip=avg(L[23],L[24]),
+        knee=avg(L[25],L[26]),ankle=avg(L[27],L[28]);
+  const headTop={x:nose.x,y:Math.max(0,2*nose.y-shoulder.y)}; // reflect nose-shoulder above nose
+  const bodyH=ankle.y-headTop.y;
+  // silhouette widths from segmentation mask (normalized by body height)
+  let widths=null;
+  if(res.segmentationMasks&&res.segmentationMasks.length){
+    const m=res.segmentationMasks[0],mw=m.width,mh=m.height,data=m.getAsFloat32Array();
+    const bodyHpx=bodyH*mh;
+    const rowW=(yN,cxN)=>{
+      const y=Math.round(yN*mh);if(y<0||y>=mh)return 0;
+      const half=Math.round(0.3*bodyHpx);
+      const x0=Math.max(0,Math.round(cxN*mw)-half),x1=Math.min(mw-1,Math.round(cxN*mw)+half);
+      let c=0;for(let x=x0;x<=x1;x++)if(data[y*mw+x]>0.5)c++;
+      return c/bodyHpx*100; // % of height
+    };
+    const waistY=hip.y-(hip.y-shoulder.y)*0.33;
+    widths={
+      '허리':rowW(waistY,hip.x),
+      '엉덩이':rowW(hip.y,hip.x),
+      '허벅지':rowW((hip.y+knee.y)/2,hip.x),
+      '종아리':rowW((knee.y+ankle.y)/2,ankle.x)
+    };
+    res.segmentationMasks.forEach(mm=>mm.close&&mm.close());
+  }
+  return {headTop,ankle,hip,bodyH,widths};
+}
+function alignedCanvas(img,a,W,H){
+  // place headTop at 8%H, ankles at 88%H, hip centered horizontally
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;
+  const ctx=cv.getContext('2d');ctx.fillStyle='#101215';ctx.fillRect(0,0,W,H);
+  const iw=img.naturalWidth,ih=img.naturalHeight;
+  const k=(0.80*H)/(a.bodyH*ih);           // scale: body height → 80% of frame
+  const dx=W/2-a.hip.x*iw*k, dy=0.08*H-a.headTop.y*ih*k;
+  ctx.drawImage(img,dx,dy,iw*k,ih*k);
+  return cv;
+}
+$('#aiAlignBtn').onclick=async()=>{
+  if(!(cmpBefore&&cmpAfter))return;
+  const btn=$('#aiAlignBtn');btn.disabled=true;btn.textContent='🤖 분석 중...';
+  try{
+    const [imgB,imgA]=await Promise.all([blobToImg(cmpBefore.blob),blobToImg(cmpAfter.blob)]);
+    const [pB,pA]=[await analyzePose(imgB),await analyzePose(imgA)];
+    if(!pB||!pA){toast('사진에서 전신을 찾지 못했어요. 몸 전체가 나온 사진으로 시도해보세요');return;}
+    const W=720,H=960;
+    const [cB,cA]=[alignedCanvas(imgB,pB,W,H),alignedCanvas(imgA,pA,W,H)];
+    const [bB,bA]=await Promise.all([
+      new Promise(r=>cB.toBlob(r,'image/jpeg',0.9)),
+      new Promise(r=>cA.toBlob(r,'image/jpeg',0.9))]);
+    $('#imgBefore').src=objURL(bB);$('#imgAfter').src=objURL(bA);
+    setHandle(50);
+    // width comparison table
+    if(pB.widths&&pA.widths){
+      let rows='';
+      for(const part of ['허리','엉덩이','허벅지','종아리']){
+        const b=pB.widths[part],a2=pA.widths[part];
+        if(!b||!a2)continue;
+        const d=(a2-b)/b*100,sign=d>0?'+':'';
+        const col=Math.abs(d)<1.5?'var(--ink-soft)':(d<0?'var(--blue)':'var(--proof)');
+        rows+=`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px">
+          <b>${part}</b><span style="font-family:var(--mono);color:${col}">${sign}${d.toFixed(1)}%</span></div>`;
+      }
+      $('#aiResult').innerHTML=`<b style="font-size:14px">📐 실루엣 폭 변화 (키 기준 보정)</b>
+        <div style="margin-top:8px">${rows}</div>
+        <p class="hint" style="margin:10px 0 0">몸 실루엣 가로폭을 키로 나눠 비교한 추정치예요. 옷·자세·조명이 비슷할수록 정확해요. ±1.5% 이내는 오차범위.</p>`;
+      $('#aiResult').style.display='block';
+    }
+    toast('키 기준으로 정렬 완료!');
+  }catch(err){
+    console.warn(err);
+    toast('AI 모델을 불러오지 못했어요. 인터넷 연결 후 다시 시도해주세요');
+  }finally{btn.disabled=false;btn.textContent='🤖 AI 자동 정렬 + 부위 비교';}
+};
 
 /* ---------- SHARE CARD ---------- */
 let shareFrom=null;
