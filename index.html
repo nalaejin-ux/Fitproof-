@@ -284,6 +284,7 @@
         <button class="cam-pill" id="importGrid">▦ 그리드</button>
         <button class="cam-pill" id="importReset">↺ 처음으로</button>
         <div class="grow" style="flex:1"></div>
+        <span class="cam-pill" id="impStepPill" style="display:none;cursor:default;background:rgba(232,75,60,.75)"></span>
         <span class="cam-pill" style="cursor:default">손가락: 이동·확대</span>
       </div>
       <div class="cam-bottom">
@@ -314,8 +315,8 @@
       <div class="handle" id="handle"></div>
     </div>
     <div style="flex:1"></div>
-    <button class="btn btn-ink" id="aiAlignBtn" style="display:none;margin-top:14px">🤖 AI 자동 정렬 + 부위 비교</button>
-    <div class="card" id="aiResult" style="display:none;margin-top:12px"></div>
+    <button class="btn btn-ink" id="alignCompareBtn" style="display:none;margin-top:14px">🎯 두 사진 손으로 맞춰서 비교</button>
+    <p class="hint" id="alignHint" style="display:none;text-align:center;margin-top:8px">AI 없이 직접 맞추는 방식이라 비용 걱정 없어요</p>
     <button class="btn btn-proof" id="toShare" style="display:none;margin-top:14px">이걸로 공유카드 만들기 ›</button>
   </section>
 
@@ -417,6 +418,7 @@ function objURL(blob){const u=URL.createObjectURL(blob);State.blobURLs.push(u);r
 
 /* ---------- navigation ---------- */
 function go(id){
+  if(id!=='import'&&cmpAlignStep!==0){cmpAlignStep=0;imp.mode='save';}
   $$('.screen').forEach(s=>s.classList.remove('active'));
   const el=$('#s-'+id);el.classList.add('active');window.scrollTo(0,0);
   if(id!=='capture')stopCamera();
@@ -665,7 +667,7 @@ async function capture(){
   if(fitMode){
     flash();
     const img=new Image();
-    img.onload=()=>{imp.img=img;imp.angle=capAngle;imp.cond=capCondition;imp.challenge=ch;imp.src='camera';go('import');};
+    img.onload=()=>{imp.img=img;imp.angle=capAngle;imp.cond=capCondition;imp.challenge=ch;imp.src='camera';imp.mode='save';go('import');};
     img.src=objURL(blob);
     return;
   }
@@ -680,28 +682,40 @@ function flash(){const f=document.createElement('div');f.style.cssText='position
   $('.cam-wrap').appendChild(f);requestAnimationFrame(()=>{f.style.opacity='0';setTimeout(()=>f.remove(),320);});}
 
 /* ---------- IMPORT (fit existing photo to grid) ---------- */
-const imp={img:null,x:0,y:0,scale:1,baseW:0,baseH:0,angle:'front',cond:CONDITIONS[0],grid:true,challenge:null,src:'gallery'};
+const imp={img:null,x:0,y:0,scale:1,baseW:0,baseH:0,angle:'front',cond:CONDITIONS[0],grid:true,challenge:null,src:'gallery',mode:'save'};
 let fitMode=true,autofitStage=0,afHead=null;
 $('#fitToggle').onclick=()=>{fitMode=!fitMode;const b=$('#fitToggle');b.textContent='🎯 맞춤 '+(fitMode?'ON':'OFF');b.style.background=fitMode?'rgba(232,75,60,.75)':'rgba(20,22,26,.6)';};
-$('#importBtn').onclick=async()=>{
-  const ch=await getActive();
-  if(!ch){toast('먼저 챌린지를 만들어주세요');return go('create');}
-  $('#importFile').value='';$('#importFile').click();
+$('#importBtn').onclick=()=>{
+  // NOTE: file-picker .click() must stay synchronous with the tap (no await before it),
+  // otherwise iOS Safari silently blocks the picker. Do async checks after the file is chosen.
+  $('#importFile').value='';
+  $('#importFile').click();
 };
 $('#importFile').onchange=e=>{
   const f=e.target.files[0];if(!f)return;
   const img=new Image();
-  img.onload=async()=>{imp.img=img;imp.angle='front';imp.cond=CONDITIONS[0];imp.grid=true;imp.src='gallery';imp.challenge=await getActive();go('import');};
+  img.onload=async()=>{
+    const ch=await getActive();
+    if(!ch){toast('먼저 챌린지를 만들어주세요');return go('create');}
+    imp.img=img;imp.angle='front';imp.cond=CONDITIONS[0];imp.grid=true;imp.src='gallery';imp.mode='save';imp.challenge=ch;go('import');
+  };
   img.src=objURL(f);
 };
 function stageSize(){const s=$('#importStage');return {w:s.clientWidth,h:s.clientHeight};}
 function initImport(){
   autofitStage=0;afHead=null;
+  const isCmp=imp.mode==='cmp';
+  $('#impAngleSeg').style.display=isCmp?'none':'flex';
+  $('#impCondRow').style.display=isCmp?'none':'flex';
+  $('#impStepPill').style.display=isCmp?'block':'none';
+  if(isCmp)$('#impStepPill').textContent=cmpStepLabel();
+  $('#importSave').textContent=isCmp?(cmpAlignStep===1?'다음: AFTER 맞추기 ›':'정렬 완료 · 비교 보기'):'이 위치로 저장';
   $$('#impAngleSeg .seg').forEach(b=>{b.setAttribute('aria-pressed',b.dataset.angle===imp.angle);
     b.onclick=()=>{imp.angle=b.dataset.angle;$$('#impAngleSeg .seg').forEach(x=>x.setAttribute('aria-pressed',x===b));drawImportGuides();};});
   chipGroup($('#impCondRow'),CONDITIONS,imp.cond,v=>imp.cond=v);
   requestAnimationFrame(()=>{fitImportImage();drawImportGuides();
-    toast(imp.src==='camera'?'머리·발 자동맞춤을 누르거나 손가락으로 맞춰 저장하세요':'손가락으로 맞추거나 자동맞춤을 눌러보세요');});
+    toast(isCmp?'손가락으로 몸 크기·위치를 맞추거나 머리·발 탭 자동맞춤을 써보세요':
+      (imp.src==='camera'?'머리·발 자동맞춤을 누르거나 손가락으로 맞춰 저장하세요':'손가락으로 맞추거나 자동맞춤을 눌러보세요'));});
 }
 function fitImportImage(){
   const img=imp.img;if(!img)return;
@@ -767,13 +781,42 @@ $('#autoFitBtn').onclick=()=>{
   autofitStage=1;afHead=null;$('#autoFitBtn').style.outline='2px solid #fff';
   toast('① 머리 꼭대기를 탭하세요');
 };
-$('#importSave').onclick=async()=>{
-  if(!imp.img||!imp.challenge){toast('이미지를 먼저 불러오세요');return;}
+async function rasterizeImportFrame(){
   const {w,h}=stageSize(),out=2;
   const cv=document.createElement('canvas');cv.width=w*out;cv.height=h*out;
-  const ctx=cv.getContext('2d');ctx.fillStyle='#000';ctx.fillRect(0,0,cv.width,cv.height);
+  const ctx=cv.getContext('2d');ctx.fillStyle='#101215';ctx.fillRect(0,0,cv.width,cv.height);
   ctx.drawImage(imp.img,imp.x*out,imp.y*out,imp.baseW*imp.scale*out,imp.baseH*imp.scale*out);
-  const blob=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.9));
+  return new Promise(r=>cv.toBlob(r,'image/jpeg',0.9));
+}
+$('#importSave').onclick=async()=>{
+  if(!imp.img){toast('이미지를 먼저 불러오세요');return;}
+  if(imp.mode==='cmp'){
+    const blob=await rasterizeImportFrame();
+    if(cmpAlignStep===1){
+      cmpAlignedBefore=blob;
+      cmpAlignStep=2;
+      imp.img=await blobToImg(cmpAfter.blob);
+      imp.angle=cmpAfter.angle||'front';
+      initImport();
+      toast('BEFORE 정렬 완료 · 이제 AFTER 사진을 맞춰주세요');
+      return;
+    }
+    // step 2 done — both aligned, load into the compare slider
+    cmpAlignedAfter=blob;
+    cmpAlignStep=0;imp.mode='save';
+    $('#imgBefore').src=objURL(cmpAlignedBefore);
+    $('#imgAfter').src=objURL(cmpAlignedAfter);
+    $('#tagB').textContent=`BEFORE · D${cmpBefore.dayNumber}`;
+    $('#tagA').textContent=`AFTER · D${cmpAfter.dayNumber}`;
+    go('compare');
+    $('#slider').style.display='block';$('#toShare').style.display='flex';
+    $('#alignCompareBtn').style.display='flex';$('#alignHint').style.display='block';
+    setHandle(50);
+    toast('손으로 맞춰서 정렬 완료!');
+    return;
+  }
+  if(!imp.challenge){toast('이미지를 먼저 불러오세요');return;}
+  const blob=await rasterizeImportFrame();
   const ch=imp.challenge,day=Math.max(1,Math.floor((today()-ch.startDate)/86400000)+1);
   await DB.put('photos',{id:uid(),challengeId:ch.id,blob,condition:imp.cond,dayNumber:day,takenAt:Date.now(),angle:imp.angle,imported:imp.src!=='camera'});
   toast(`DAY ${day} · ${ANGLE_LABEL[imp.angle]} 저장 완료`);go('home');
@@ -796,7 +839,7 @@ async function initCompare(){
 async function buildCmpThumbs(){
   cmpBefore=null;cmpAfter=null;
   $('#slider').style.display='none';$('#toShare').style.display='none';
-  $('#aiAlignBtn').style.display='none';$('#aiResult').style.display='none';
+  $('#alignCompareBtn').style.display='none';$('#alignHint').style.display='none';
   const ch=await getActive();
   const photos=(await DB.all('photos')).filter(p=>(!ch||p.challengeId===ch.id)&&(p.angle||'front')===cmpAngle).sort((a,b)=>a.takenAt-b.takenAt);
   const pick=$('#cmpPick');pick.innerHTML='';
@@ -827,7 +870,7 @@ async function renderSlider(){
   $('#tagB').textContent=`BEFORE · D${cmpBefore.dayNumber}`;
   $('#tagA').textContent=`AFTER · D${cmpAfter.dayNumber}`;
   $('#slider').style.display='block';$('#toShare').style.display='flex';
-  $('#aiAlignBtn').style.display='flex';$('#aiResult').style.display='none';
+  $('#alignCompareBtn').style.display='flex';$('#alignHint').style.display='block';
   setHandle(50);
 }
 function setHandle(pct){
@@ -844,97 +887,20 @@ function setHandle(pct){
 })();
 $('#toShare').onclick=()=>{shareFrom={before:cmpBefore,after:cmpAfter};go('share');};
 
-/* ---------- AI POSE ALIGN (photos never leave the device) ---------- */
-let poseLM=null;
-async function loadPose(){
-  if(poseLM)return poseLM;
-  toast('AI 모델 준비 중... 최초 1회만 내려받아요');
-  const vision=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
-  const files=await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
-  poseLM=await vision.PoseLandmarker.createFromOptions(files,{
-    baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'},
-    runningMode:'IMAGE',numPoses:1,outputSegmentationMasks:true});
-  return poseLM;
-}
-const avg=(a,b)=>({x:(a.x+b.x)/2,y:(a.y+b.y)/2});
-async function analyzePose(img){
-  const lm=await loadPose();
-  const res=lm.detect(img);
-  if(!res.landmarks||!res.landmarks.length)return null;
-  const L=res.landmarks[0];
-  const nose=L[0],shoulder=avg(L[11],L[12]),hip=avg(L[23],L[24]),
-        knee=avg(L[25],L[26]),ankle=avg(L[27],L[28]);
-  const headTop={x:nose.x,y:Math.max(0,2*nose.y-shoulder.y)}; // reflect nose-shoulder above nose
-  const bodyH=ankle.y-headTop.y;
-  // silhouette widths from segmentation mask (normalized by body height)
-  let widths=null;
-  if(res.segmentationMasks&&res.segmentationMasks.length){
-    const m=res.segmentationMasks[0],mw=m.width,mh=m.height,data=m.getAsFloat32Array();
-    const bodyHpx=bodyH*mh;
-    const rowW=(yN,cxN)=>{
-      const y=Math.round(yN*mh);if(y<0||y>=mh)return 0;
-      const half=Math.round(0.3*bodyHpx);
-      const x0=Math.max(0,Math.round(cxN*mw)-half),x1=Math.min(mw-1,Math.round(cxN*mw)+half);
-      let c=0;for(let x=x0;x<=x1;x++)if(data[y*mw+x]>0.5)c++;
-      return c/bodyHpx*100; // % of height
-    };
-    const waistY=hip.y-(hip.y-shoulder.y)*0.33;
-    widths={
-      '허리':rowW(waistY,hip.x),
-      '엉덩이':rowW(hip.y,hip.x),
-      '허벅지':rowW((hip.y+knee.y)/2,hip.x),
-      '종아리':rowW((knee.y+ankle.y)/2,ankle.x)
-    };
-    res.segmentationMasks.forEach(mm=>mm.close&&mm.close());
-  }
-  return {headTop,ankle,hip,bodyH,widths};
-}
-function alignedCanvas(img,a,W,H){
-  // place headTop at 8%H, ankles at 88%H, hip centered horizontally
-  const cv=document.createElement('canvas');cv.width=W;cv.height=H;
-  const ctx=cv.getContext('2d');ctx.fillStyle='#101215';ctx.fillRect(0,0,W,H);
-  const iw=img.naturalWidth,ih=img.naturalHeight;
-  const k=(0.80*H)/(a.bodyH*ih);           // scale: body height → 80% of frame
-  const dx=W/2-a.hip.x*iw*k, dy=0.08*H-a.headTop.y*ih*k;
-  ctx.drawImage(img,dx,dy,iw*k,ih*k);
-  return cv;
-}
-$('#aiAlignBtn').onclick=async()=>{
+/* ---------- MANUAL ALIGN FOR COMPARE (no AI, no network — pure on-device math) ---------- */
+let cmpAlignStep=0,cmpAlignedBefore=null,cmpAlignedAfter=null;
+async function startCompareAlign(){
   if(!(cmpBefore&&cmpAfter))return;
-  const btn=$('#aiAlignBtn');btn.disabled=true;btn.textContent='🤖 분석 중...';
-  try{
-    const [imgB,imgA]=await Promise.all([blobToImg(cmpBefore.blob),blobToImg(cmpAfter.blob)]);
-    const [pB,pA]=[await analyzePose(imgB),await analyzePose(imgA)];
-    if(!pB||!pA){toast('사진에서 전신을 찾지 못했어요. 몸 전체가 나온 사진으로 시도해보세요');return;}
-    const W=720,H=960;
-    const [cB,cA]=[alignedCanvas(imgB,pB,W,H),alignedCanvas(imgA,pA,W,H)];
-    const [bB,bA]=await Promise.all([
-      new Promise(r=>cB.toBlob(r,'image/jpeg',0.9)),
-      new Promise(r=>cA.toBlob(r,'image/jpeg',0.9))]);
-    $('#imgBefore').src=objURL(bB);$('#imgAfter').src=objURL(bA);
-    setHandle(50);
-    // width comparison table
-    if(pB.widths&&pA.widths){
-      let rows='';
-      for(const part of ['허리','엉덩이','허벅지','종아리']){
-        const b=pB.widths[part],a2=pA.widths[part];
-        if(!b||!a2)continue;
-        const d=(a2-b)/b*100,sign=d>0?'+':'';
-        const col=Math.abs(d)<1.5?'var(--ink-soft)':(d<0?'var(--blue)':'var(--proof)');
-        rows+=`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px">
-          <b>${part}</b><span style="font-family:var(--mono);color:${col}">${sign}${d.toFixed(1)}%</span></div>`;
-      }
-      $('#aiResult').innerHTML=`<b style="font-size:14px">📐 실루엣 폭 변화 (키 기준 보정)</b>
-        <div style="margin-top:8px">${rows}</div>
-        <p class="hint" style="margin:10px 0 0">몸 실루엣 가로폭을 키로 나눠 비교한 추정치예요. 옷·자세·조명이 비슷할수록 정확해요. ±1.5% 이내는 오차범위.</p>`;
-      $('#aiResult').style.display='block';
-    }
-    toast('키 기준으로 정렬 완료!');
-  }catch(err){
-    console.warn(err);
-    toast('AI 모델을 불러오지 못했어요. 인터넷 연결 후 다시 시도해주세요');
-  }finally{btn.disabled=false;btn.textContent='🤖 AI 자동 정렬 + 부위 비교';}
-};
+  cmpAlignStep=1;
+  imp.mode='cmp';imp.src='compare';
+  imp.img=await blobToImg(cmpBefore.blob);
+  imp.angle=cmpBefore.angle||'front';
+  go('import');
+}
+function cmpStepLabel(){
+  return cmpAlignStep===1?'STEP 1/2 · BEFORE 맞추기':'STEP 2/2 · AFTER 맞추기';
+}
+$('#alignCompareBtn').onclick=()=>startCompareAlign();
 
 /* ---------- SHARE CARD ---------- */
 let shareFrom=null;
